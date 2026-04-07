@@ -1,4 +1,6 @@
 import java.util.HashMap;
+import java.util.ArrayList;
+import java.util.List;
 
 // Abstract class
 abstract class Hotel {
@@ -26,40 +28,62 @@ class LuxuryHotel extends Hotel {
     }
 }
 
-// New class for centralized inventory management
+// Room class (holds details)
+class Room {
+    String type;
+    double price;
+
+    Room(String type, double price) {
+        this.type = type;
+        this.price = price;
+    }
+
+    void showRoom() {
+        System.out.println("Room Type: " + type + ", Price: " + price);
+    }
+}
+
+// Inventory class
 class RoomInventory {
 
     private HashMap<String, Integer> inventory;
 
-    // Initialize inventory
     RoomInventory() {
         inventory = new HashMap<>();
     }
 
-    // Register room type
     void addRoomType(String type, int count) {
         inventory.put(type, count);
     }
 
-    // Update availability
     void updateRoom(String type, int count) {
         if (inventory.containsKey(type)) {
             inventory.put(type, count);
-        } else {
-            System.out.println("Room type not found.");
         }
     }
 
-    // Get availability
     int getAvailability(String type) {
         return inventory.getOrDefault(type, 0);
     }
 
-    // Display all inventory
-    void showInventory() {
-        System.out.println("Current Room Inventory:");
-        for (String type : inventory.keySet()) {
-            System.out.println(type + " -> " + inventory.get(type));
+    HashMap<String, Integer> getAllInventory() {
+        return inventory; // read access (used by search)
+    }
+}
+
+// Search Service (read-only)
+class SearchService {
+
+    void searchAvailableRooms(RoomInventory inventory, List<Room> rooms) {
+        System.out.println("\nAvailable Rooms:");
+
+        for (Room room : rooms) {
+            int available = inventory.getAvailability(room.type);
+
+            if (available > 0) { // filter unavailable rooms
+                room.showRoom();
+                System.out.println("Available Count: " + available);
+            }
         }
     }
 }
@@ -69,33 +93,35 @@ public class bookmystay {
 
     /**
      * Goal:
-     * Introduce object modeling through inheritance and abstraction.
+     * Abstraction + Inheritance
      *
      * Goal:
-     * Introduce centralized inventory management using HashMap.
+     * Centralized inventory using HashMap
+     *
+     * Goal:
+     * Enable read-only search without modifying system state
      */
 
     public static void main(String[] args) {
 
         System.out.println("Welcome to bookmystay ver:1.00");
 
-        // OOP demo
+        // Hotel demo
         Hotel hotel = new LuxuryHotel("Taj Palace", "Chennai");
         hotel.showDetails();
 
-        // Inventory system demo
+        // Inventory setup
         RoomInventory inventory = new RoomInventory();
-
         inventory.addRoomType("Deluxe", 10);
-        inventory.addRoomType("Suite", 5);
+        inventory.addRoomType("Suite", 0); // unavailable
 
-        inventory.showInventory();
+        // Room details
+        List<Room> rooms = new ArrayList<>();
+        rooms.add(new Room("Deluxe", 3000));
+        rooms.add(new Room("Suite", 5000));
 
-        inventory.updateRoom("Deluxe", 8);
-
-        System.out.println("Updated Availability (Deluxe): " +
-                inventory.getAvailability("Deluxe"));
-
-        inventory.showInventory();
+        // Search (read-only)
+        SearchService searchService = new SearchService();
+        searchService.searchAvailableRooms(inventory, rooms);
     }
 }
