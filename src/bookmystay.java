@@ -19,13 +19,12 @@ class LuxuryHotel extends Hotel {
         super(name, location);
     }
 
-    @Override
     void showDetails() {
         System.out.println("Luxury Hotel: " + name + ", Location: " + location);
     }
 }
 
-// Room class
+// Room
 class Room {
     String type;
     double price;
@@ -104,7 +103,7 @@ class BookingRequestQueue {
     }
 }
 
-// Booking Record (for history)
+// Booking Record
 class BookingRecord {
     String guestName;
     String roomType;
@@ -123,7 +122,7 @@ class BookingRecord {
     }
 }
 
-// Booking History (insertion order preserved)
+// Booking History
 class BookingHistory {
     private List<BookingRecord> records = new ArrayList<>();
 
@@ -136,9 +135,8 @@ class BookingHistory {
     }
 }
 
-// Booking Report Service
+// Report Service
 class BookingReportService {
-
     void showAllBookings(BookingHistory history) {
         System.out.println("\n--- Booking History ---");
         for (BookingRecord r : history.getAllRecords()) {
@@ -151,12 +149,42 @@ class BookingReportService {
     }
 }
 
+// Custom Exception
+class InvalidBookingException extends Exception {
+    InvalidBookingException(String message) {
+        super(message);
+    }
+}
+
+// Validator
+class InvalidBookingValidator {
+    void validate(Reservation request, RoomInventory inventory) throws InvalidBookingException {
+
+        if (request == null) {
+            throw new InvalidBookingException("Booking request cannot be null");
+        }
+
+        if (request.guestName == null || request.guestName.trim().isEmpty()) {
+            throw new InvalidBookingException("Guest name is invalid");
+        }
+
+        if (request.roomType == null || request.roomType.trim().isEmpty()) {
+            throw new InvalidBookingException("Room type is invalid");
+        }
+
+        if (inventory.getAvailability(request.roomType) < 0) {
+            throw new InvalidBookingException("Invalid inventory state");
+        }
+    }
+}
+
 // Booking Service
 class BookingService {
 
     private Set<String> allocatedRoomIds = new HashSet<>();
     private int roomCounter = 1;
     private BookingHistory history;
+    private InvalidBookingValidator validator = new InvalidBookingValidator();
 
     BookingService(BookingHistory history) {
         this.history = history;
@@ -170,30 +198,37 @@ class BookingService {
 
     String processSingleBooking(Reservation request, RoomInventory inventory) {
 
-        if (inventory.getAvailability(request.roomType) > 0) {
+        try {
+            validator.validate(request, inventory);
 
-            String roomId = request.roomType + "-" + roomCounter++;
+            if (inventory.getAvailability(request.roomType) > 0) {
 
-            if (!allocatedRoomIds.contains(roomId)) {
-                allocatedRoomIds.add(roomId);
-                inventory.decrementRoom(request.roomType);
+                String roomId = request.roomType + "-" + roomCounter++;
 
-                System.out.println("\nBooking Confirmed!");
-                System.out.println("Guest: " + request.guestName);
-                System.out.println("Room ID: " + roomId);
+                if (!allocatedRoomIds.contains(roomId)) {
+                    allocatedRoomIds.add(roomId);
+                    inventory.decrementRoom(request.roomType);
 
-                // ✅ Add to history
-                history.addRecord(new BookingRecord(
-                        request.guestName,
-                        request.roomType,
-                        roomId
-                ));
+                    System.out.println("\nBooking Confirmed!");
+                    System.out.println("Guest: " + request.guestName);
+                    System.out.println("Room ID: " + roomId);
 
-                return roomId;
+                    history.addRecord(new BookingRecord(
+                            request.guestName,
+                            request.roomType,
+                            roomId
+                    ));
+
+                    return roomId;
+                }
+            } else {
+                System.out.println("\nBooking Failed: No availability for " + request.roomType);
             }
+
+        } catch (InvalidBookingException e) {
+            System.out.println("\nBooking Error: " + e.getMessage());
         }
 
-        System.out.println("\nBooking Failed for " + request.guestName);
         return null;
     }
 }
@@ -231,8 +266,8 @@ class AddOnServiceManager {
 
     void showServices(String roomId) {
         System.out.println("\nAdd-On Services for Room: " + roomId);
-        List<AddOnService> services = addOnMap.get(roomId);
 
+        List<AddOnService> services = addOnMap.get(roomId);
         if (services != null) {
             for (AddOnService s : services) {
                 System.out.println(s.name + " - " + s.price);
@@ -269,14 +304,17 @@ public class bookmystay {
         queue.addRequest(new Reservation("Priya", "Suite"));
         queue.addRequest(new Reservation("Rahul", "Deluxe"));
 
-        // History setup
-        BookingHistory history = new BookingHistory();
+        // Invalid test cases
+        queue.addRequest(new Reservation("", "Deluxe"));
+        queue.addRequest(new Reservation("Ravi", ""));
+        queue.addRequest(new Reservation(null, "Suite"));
 
-        // Booking Service with history
+        BookingHistory history = new BookingHistory();
         BookingService bookingService = new BookingService(history);
+
         bookingService.processBookings(queue, inventory);
 
-        // Add-on demo
+        // Add-ons
         AddOnServiceManager addOnManager = new AddOnServiceManager();
         AddOnService breakfast = new AddOnService("Breakfast", 500);
 
@@ -289,9 +327,12 @@ public class bookmystay {
 
             addOnManager.addServices(roomId, services);
             addOnManager.showServices(roomId);
+
+            double total = addOnManager.calculateTotalCost(roomId);
+            System.out.println("Total Add-On Cost: " + total);
         }
 
-        // Admin reporting
+        // Admin report
         BookingReportService reportService = new BookingReportService();
         reportService.showAllBookings(history);
         reportService.showTotalBookings(history);
