@@ -1,25 +1,33 @@
+import java.io.*;
 import java.util.*;
 
-// Inventory (shared resource)
-class RoomInventory {
+// Serializable Inventory
+class RoomInventory implements Serializable {
     private Map<String, Integer> inventory = new HashMap<>();
 
-    synchronized void addRoomType(String type, int count) {
+    void addRoomType(String type, int count) {
         inventory.put(type, count);
     }
 
-    synchronized int getAvailability(String type) {
+    int getAvailability(String type) {
         return inventory.getOrDefault(type, 0);
     }
 
-    // Critical section
-    synchronized boolean bookRoom(String type) {
+    boolean bookRoom(String type) {
         int available = getAvailability(type);
         if (available > 0) {
             inventory.put(type, available - 1);
             return true;
         }
         return false;
+    }
+
+    void incrementRoom(String type) {
+        inventory.put(type, getAvailability(type) + 1);
+    }
+
+    Map<String, Integer> getAll() {
+        return inventory;
     }
 }
 
@@ -34,110 +42,127 @@ class Reservation {
     }
 }
 
-// Thread-safe Queue
-class BookingRequestQueue {
-    private Queue<Reservation> queue = new LinkedList<>();
+// Booking Record
+class BookingRecord implements Serializable {
+    String guestName;
+    String roomType;
+    String roomId;
+    String status;
 
-    synchronized void addRequest(Reservation r) {
-        queue.offer(r);
+    BookingRecord(String guestName, String roomType, String roomId) {
+        this.guestName = guestName;
+        this.roomType = roomType;
+        this.roomId = roomId;
+        this.status = "CONFIRMED";
     }
 
-    synchronized Reservation getRequest() {
-        return queue.poll();
+    void cancel() {
+        status = "CANCELLED";
     }
 
-    synchronized boolean isEmpty() {
-        return queue.isEmpty();
+    void show() {
+        System.out.println(guestName + " | " + roomType + " | " + roomId + " | " + status);
     }
 }
 
 // Booking History
-class BookingRecord {
-    String guestName;
-    String roomId;
-
-    BookingRecord(String guestName, String roomId) {
-        this.guestName = guestName;
-        this.roomId = roomId;
-    }
-}
-
-class BookingHistory {
+class BookingHistory implements Serializable {
     private List<BookingRecord> records = new ArrayList<>();
 
-    synchronized void addRecord(BookingRecord record) {
-        records.add(record);
+    void add(BookingRecord r) {
+        records.add(r);
     }
 
-    synchronized void showAll() {
-        System.out.println("\n--- Booking History ---");
+    List<BookingRecord> getAll() {
+        return records;
+    }
+
+    BookingRecord find(String roomId) {
         for (BookingRecord r : records) {
-            System.out.println(r.guestName + " -> " + r.roomId);
+            if (r.roomId.equals(roomId)) return r;
         }
+        return null;
     }
 }
 
-// Booking Service (shared)
+// Booking Service
 class BookingService {
     private int counter = 1;
-
-    synchronized String generateRoomId(String type) {
-        return type + "-" + counter++;
-    }
-}
-
-// Worker Thread
-class BookingProcessor implements Runnable {
-
-    private BookingRequestQueue queue;
-    private RoomInventory inventory;
-    private BookingService service;
     private BookingHistory history;
 
-    BookingProcessor(BookingRequestQueue queue,
-                     RoomInventory inventory,
-                     BookingService service,
-                     BookingHistory history) {
-        this.queue = queue;
-        this.inventory = inventory;
-        this.service = service;
+    BookingService(BookingHistory history) {
         this.history = history;
     }
 
-    @Override
-    public void run() {
+    String book(Reservation req, RoomInventory inv) {
+        if (inv.bookRoom(req.roomType)) {
+            String id = req.roomType + "-" + counter++;
 
-        while (true) {
+            BookingRecord record = new BookingRecord(
+                    req.guestName, req.roomType, id
+            );
+            history.add(record);
 
-            Reservation request;
+            System.out.println("Booked: " + id);
+            return id;
+        }
+        System.out.println("Booking failed");
+        return null;
+    }
+}
 
-            // synchronized queue access
-            synchronized (queue) {
-                if (queue.isEmpty()) break;
-                request = queue.getRequest();
-            }
+// Cancellation
+class CancellationService {
+    void cancel(String roomId, BookingHistory history, RoomInventory inv) {
 
-            if (request == null) continue;
+        BookingRecord r = history.find(roomId);
 
-            // Critical section (inventory + allocation)
-            synchronized (inventory) {
+        if (r == null || r.status.equals("CANCELLED")) {
+            System.out.println("Invalid cancellation");
+            return;
+        }
 
-                if (inventory.bookRoom(request.roomType)) {
+        inv.incrementRoom(r.roomType);
+        r.cancel();
 
-                    String roomId = service.generateRoomId(request.roomType);
+        System.out.println("Cancelled: " + roomId);
+    }
+}
 
-                    history.addRecord(new BookingRecord(
-                            request.guestName, roomId
-                    ));
+// ✅ Persistence Service
+class PersistenceService {
 
-                    System.out.println(Thread.currentThread().getName() +
-                            " booked " + roomId + " for " + request.guestName);
+    private static final String FILE = "system_state.dat";
 
-                } else {
-                    System.out.println(Thread.currentThread().getName() +
-                            " FAILED for " + request.guestName);
-                }
-            }
+    // Save system state
+    void save(RoomInventory inv, BookingHistory history) {
+        try (ObjectOutputStream oos =
+                     new ObjectOutputStream(new FileOutputStream(FILE))) {
+
+            oos.writeObject(inv);
+            oos.writeObject(history);
+
+            System.out.println("System state saved.");
+
+        } catch (IOException e) {
+            System.out.println("Save failed: " + e.getMessage());
+        }
+    }
+
+    // Load system state
+    Object[] load() {
+        try (ObjectInputStream ois =
+                     new ObjectInputStream(new FileInputStream(FILE))) {
+
+            RoomInventory inv = (RoomInventory) ois.readObject();
+            BookingHistory history = (BookingHistory) ois.readObject();
+
+            System.out.println("System state restored.");
+            return new Object[]{inv, history};
+
+        } catch (Exception e) {
+            System.out.println("No previous state found. Starting fresh.");
+            return null;
         }
     }
 }
@@ -145,36 +170,45 @@ class BookingProcessor implements Runnable {
 // Main
 public class bookmystay {
 
-    public static void main(String[] args) throws InterruptedException {
+    public static void main(String[] args) {
 
-        RoomInventory inventory = new RoomInventory();
-        inventory.addRoomType("Deluxe", 2);
+        PersistenceService ps = new PersistenceService();
 
-        BookingRequestQueue queue = new BookingRequestQueue();
+        RoomInventory inventory;
+        BookingHistory history;
 
-        // Multiple guests (simultaneous requests)
-        queue.addRequest(new Reservation("Arun", "Deluxe"));
-        queue.addRequest(new Reservation("Priya", "Deluxe"));
-        queue.addRequest(new Reservation("Rahul", "Deluxe"));
-        queue.addRequest(new Reservation("Anita", "Deluxe"));
+        // 🔁 LOAD STATE (startup)
+        Object[] state = ps.load();
 
-        BookingService service = new BookingService();
-        BookingHistory history = new BookingHistory();
+        if (state != null) {
+            inventory = (RoomInventory) state[0];
+            history = (BookingHistory) state[1];
+        } else {
+            inventory = new RoomInventory();
+            history = new BookingHistory();
 
-        // Multiple threads (concurrent processing)
-        Thread t1 = new Thread(new BookingProcessor(queue, inventory, service, history), "T1");
-        Thread t2 = new Thread(new BookingProcessor(queue, inventory, service, history), "T2");
+            inventory.addRoomType("Deluxe", 2);
+        }
 
-        t1.start();
-        t2.start();
+        BookingService booking = new BookingService(history);
+        CancellationService cancel = new CancellationService();
 
-        t1.join();
-        t2.join();
+        // Operations
+        String id1 = booking.book(new Reservation("Arun", "Deluxe"), inventory);
+        String id2 = booking.book(new Reservation("Priya", "Deluxe"), inventory);
 
-        // Final state
-        history.showAll();
+        cancel.cancel(id1, history, inventory);
 
-        System.out.println("\nFinal Availability: " +
+        // Show history
+        System.out.println("\n--- History ---");
+        for (BookingRecord r : history.getAll()) {
+            r.show();
+        }
+
+        System.out.println("\nAvailable Deluxe: " +
                 inventory.getAvailability("Deluxe"));
+
+        // 💾 SAVE STATE (shutdown)
+        ps.save(inventory, history);
     }
 }
